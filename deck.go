@@ -35,6 +35,7 @@ type Deck struct {
 	tableStyle         *TableStyle
 	logger             *slog.Logger
 	fresh              bool
+	imageUploader      ImageUploader
 }
 
 type Option func(*Deck) error
@@ -66,6 +67,13 @@ func WithProfile(profile string) Option {
 func WithFolderID(folderID string) Option {
 	return func(d *Deck) error {
 		d.folderID = folderID
+		return nil
+	}
+}
+
+func WithImageUploader(uploader ImageUploader) Option {
+	return func(d *Deck) error {
+		d.imageUploader = uploader
 		return nil
 	}
 }
@@ -345,7 +353,32 @@ func (d *Deck) initialize(ctx context.Context) (err error) {
 	}
 	driveSrv.UserAgent = userAgent
 	d.driveSrv = driveSrv
+
+	// Initialize image uploader if not already set
+	if d.imageUploader == nil {
+		uploader, err := d.createImageUploader(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to create image uploader: %w", err)
+		}
+		d.imageUploader = uploader
+	}
+
 	return nil
+}
+
+// createImageUploader creates an ImageUploader based on environment variables.
+func (d *Deck) createImageUploader(ctx context.Context) (ImageUploader, error) {
+	switch GetImageStorageType() {
+	case "gcs":
+		d.logger.Debug("using GCS image storage")
+		return NewGCSUploader(ctx)
+	case "s3":
+		d.logger.Debug("using S3 image storage")
+		return NewS3Uploader(ctx)
+	default:
+		d.logger.Debug("using Google Drive image storage")
+		return NewGoogleDriveUploader(d.driveSrv, d.folderID), nil
+	}
 }
 
 func (d *Deck) createPage(ctx context.Context, index int, slide *Slide) (err error) {
